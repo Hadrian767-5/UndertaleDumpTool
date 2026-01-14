@@ -82,9 +82,7 @@ namespace UndertaleModTool.ProjectTool.Resources
         public List<GMImageLayer> layers { get; set; } = new();
         public GMNineSliceData nineSlice { get; set; } = null;
 
-        // Propriedades para Spine - APENAS METADATA, NÃO SERÁ SERIALIZADO NO .yy
-        [System.Text.Json.Serialization.JsonIgnore]
-        [Newtonsoft.Json.JsonIgnore]
+        // Propriedades para Spine
         public GMSpineData spine { get; set; } = null;
 
         private int BboxWidth => bbox_right - bbox_left + 1;
@@ -154,8 +152,7 @@ namespace UndertaleModTool.ProjectTool.Resources
         private Dictionary<string, IMagickImage<byte>> _imageFiles = new();
 
         /// <summary>
-        /// Exporta sprite Spine: salva arquivos .json, .atlas e texturas
-        /// GameMaker carrega esses arquivos automaticamente quando abre o projeto
+        /// Exporta os dados do Spine
         /// </summary>
         private void ExportSpineData(UndertaleSprite source)
         {
@@ -163,59 +160,21 @@ namespace UndertaleModTool.ProjectTool.Resources
             {
                 Dump.UpdateStatus($"Exporting Spine sprite: {name}");
 
+                // Verificar se é realmente um sprite Spine
                 if (!source.IsSpineSprite)
                 {
                     Dump.UpdateStatus($"Warning: {name} is not a Spine sprite");
                     return;
                 }
 
-                // Marcar como Spine
                 type = Type.Spine;
                 spine = new GMSpineData();
 
-                // Configurar dimensões
-                if (source.SpineTextures != null && source.SpineTextures.Count > 0 && source.SpineTextures[0] != null)
-                {
-                    var firstTexture = source.SpineTextures[0];
-                    if (firstTexture.PageWidth > 0 && firstTexture.PageHeight > 0)
-                    {
-                        width = (uint)firstTexture.PageWidth;
-                        height = (uint)firstTexture.PageHeight;
-                    }
-                    else
-                    {
-                        width = source.Width > 0 ? source.Width : 64;
-                        height = source.Height > 0 ? source.Height : 64;
-                    }
-                }
-                else
-                {
-                    width = source.Width > 0 ? source.Width : 64;
-                    height = source.Height > 0 ? source.Height : 64;
-                }
-
-                // Configurar origem e bbox
-                origin = Origin.TopLeft;
-                bbox_left = 0;
-                bbox_top = 0;
-                bbox_right = (int)width - 1;
-                bbox_bottom = (int)height - 1;
-                bboxMode = BboxMode.FullImage;
-
-                // Configurar sequência vazia (Spine não usa sequence tradicional)
-                sequence.name = name;
-                sequence.length = 0; // Spine não tem frames
-                sequence.playbackSpeed = 30.0f;
-                (sequence.xorigin, sequence.yorigin) = (0, 0);
-
-                // Spine NÃO tem layers nem frames
-                // As listas layers e frames devem permanecer VAZIAS
-                
-                // Exportar arquivos .json, .atlas e texturas
+                // Criar diretório do sprite
                 string spriteFolder = Dump.RelativePath($"sprites/{name}/");
                 Directory.CreateDirectory(spriteFolder);
 
-                // Exportar .atlas
+                // Exportar arquivo .atlas
                 if (!string.IsNullOrEmpty(source.SpineAtlas))
                 {
                     string atlasPath = Path.Combine(spriteFolder, $"{name}.atlas");
@@ -224,7 +183,7 @@ namespace UndertaleModTool.ProjectTool.Resources
                     Dump.UpdateStatus($"{name} - Atlas exported");
                 }
 
-                // Exportar .json
+                // Exportar arquivo .json
                 if (!string.IsNullOrEmpty(source.SpineJSON))
                 {
                     string jsonPath = Path.Combine(spriteFolder, $"{name}.json");
@@ -232,8 +191,22 @@ namespace UndertaleModTool.ProjectTool.Resources
                     spine.jsonFile = $"{name}.json";
                     Dump.UpdateStatus($"{name} - JSON exported");
                 }
+                
+                if (string.IsNullOrEmpty(source.SpineAtlas) || string.IsNullOrEmpty(source.SpineJSON))
+                {
+                    Dump.UpdateStatus($"Error: {name} - Missing Spine atlas or JSON data");
+                    type = Type.Bitmap;
+                    return;
+                }
 
-                // Exportar texturas
+                if (source.SpineTextures == null || source.SpineTextures.Count == 0)
+                {
+                    Dump.UpdateStatus($"Error: {name} - No Spine textures found");
+                    type = Type.Bitmap;
+                    return;
+                }
+
+                // Exportar texturas do Spine usando TexBlob
                 if (source.SpineTextures != null && source.SpineTextures.Count > 0)
                 {
                     for (int i = 0; i < source.SpineTextures.Count; i++)
@@ -243,13 +216,12 @@ namespace UndertaleModTool.ProjectTool.Resources
                         {
                             try
                             {
-                                // Nome da textura deve corresponder ao .atlas
-                                string textureName = $"{name}.png";
-                                if (source.SpineTextures.Count > 1)
-                                    textureName = $"{name}{i}.png";
+                                string textureName = $"{name}_texture_{i}.png";
                                 
+                                // Criar imagem a partir do TexBlob (QOI ou PNG)
                                 IMagickImage<byte> image = new MagickImage(spineTexEntry.TexBlob);
                                 
+                                // Redimensionar se necessário para corresponder às dimensões da página
                                 if (spineTexEntry.PageWidth > 0 && spineTexEntry.PageHeight > 0)
                                 {
                                     if (image.Width != spineTexEntry.PageWidth || image.Height != spineTexEntry.PageHeight)
@@ -260,13 +232,10 @@ namespace UndertaleModTool.ProjectTool.Resources
                                     }
                                 }
                                 
-                                // Salvar diretamente (não usar _imageFiles)
-                                string texturePath = Path.Combine(spriteFolder, textureName);
-                                TextureWorker.SaveImageToFile(image, texturePath);
-                                image.Dispose();
-                                
+                                _imageFiles.Add(textureName, image);
                                 spine.textureFiles.Add(textureName);
-                                Dump.UpdateStatus($"{name} - Spine Texture {i} exported");
+                                
+                                Dump.UpdateStatus($"{name} - Spine Texture {i} ({spineTexEntry.PageWidth}x{spineTexEntry.PageHeight})");
                             }
                             catch (Exception ex)
                             {
@@ -276,6 +245,69 @@ namespace UndertaleModTool.ProjectTool.Resources
                     }
                 }
 
+                // Configurar dimensões básicas (usar primeira textura se disponível)
+                if (source.SpineTextures != null && source.SpineTextures.Count > 0 && source.SpineTextures[0] != null)
+                {
+                    var firstTexture = source.SpineTextures[0];
+                    if (firstTexture.PageWidth > 0 && firstTexture.PageHeight > 0)
+                    {
+                        width = (uint)firstTexture.PageWidth;
+                        height = (uint)firstTexture.PageHeight;
+                    }
+                    else
+                    {
+                        width = source.Width;
+                        height = source.Height;
+                    }
+                }
+                else
+                {
+                    width = source.Width;
+                    height = source.Height;
+                }
+
+                // Configurar origem
+                origin = Origin.TopLeft; // Spine geralmente usa top-left como padrão
+                
+                // Configurar bounding box para o tamanho completo
+                bbox_left = 0;
+                bbox_top = 0;
+                bbox_right = (int)width - 1;
+                bbox_bottom = (int)height - 1;
+                bboxMode = BboxMode.FullImage;
+
+                // SPRITES SPINE PRECISAM DE ESTRUTURA COMPLETA COMO SPRITES NORMAIS
+                // Configurar sequência básica
+                sequence.name = name;
+                sequence.length = 1; // Spine precisa de pelo menos 1 frame
+                (sequence.xorigin, sequence.yorigin) = (0, 0);
+
+                // Configurar layer - SPINE PRECISA DE LAYER
+                var layer = new GMImageLayer();
+                layer.name = Dump.ToGUID($"{name}.layer");
+                layers.Add(layer);
+
+                // CRIAR FRAME E TRACK - NECESSÁRIO PARA EVITAR ERROS DE ÍNDICE
+                _framesTrack = new();
+                sequence.tracks.Add(_framesTrack);
+
+                string frameGuid = Dump.ToGUID($"{name}.0");
+                frames.Add(new GMSpriteFrame { name = frameGuid });
+
+                // Adicionar keyframe
+                SpriteFrameKeyframe keyframe = new();
+                keyframe.Id = new IdPath(frameGuid, $"sprites/{name}/{name}.yy");
+                Keyframe<SpriteFrameKeyframe> keyframeHolder = new();
+                keyframeHolder.id = Dump.ToGUID($"{name}.0k");
+                keyframeHolder.Key = 0;
+                keyframeHolder.Channels.Add("0", keyframe);
+                _framesTrack.keyframes.Keyframes.Add(keyframeHolder);
+
+                // Criar imagem dummy para o layer (transparente, 1x1)
+                IMagickImage<byte> dummyImage = new MagickImage(MagickColors.Transparent, width, height);
+                _imageFiles.Add($"{frameGuid}", dummyImage);
+                _imageFiles.Add($"layers/{frameGuid}/{layer.name}", dummyImage);
+
                 lock (Dump.ProjectResources)
                     Dump.ProjectResources.Add(name, "sprites");
 
@@ -284,7 +316,8 @@ namespace UndertaleModTool.ProjectTool.Resources
             catch (Exception ex)
             {
                 Dump.UpdateStatus($"Error exporting Spine sprite {name}: {ex.Message}");
-                throw;
+                // Em caso de erro, tente continuar como sprite normal
+                type = Type.Bitmap;
             }
         }
 
@@ -478,17 +511,18 @@ namespace UndertaleModTool.ProjectTool.Resources
             string savePath = Dump.RelativePath(spriteFolder);
             Directory.CreateDirectory(savePath);
 
-            // Salvar imagens APENAS para sprites bitmap (não Spine)
-            if (type != Type.Spine)
+            // Salvar imagens
+            foreach (var i in _imageFiles)
             {
-                foreach (var i in _imageFiles)
-                {
-                    string path = Path.Combine(savePath, i.Key);
-                    Directory.CreateDirectory(Path.GetDirectoryName(path));
-                    TextureWorker.SaveImageToFile(i.Value, path + ".png");
-                }
+                string path = Path.Combine(savePath, i.Key);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+    
+                // Verificar se já tem extensão .png
+                if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    path += ".png";
+    
+                TextureWorker.SaveImageToFile(i.Value, path);
             }
-            // Para Spine, as texturas já foram salvas em ExportSpineData()
 
             // Salvar .yy
             Dump.ToJsonFile(Path.Join(savePath, $"{name}.yy"), this);
@@ -562,7 +596,7 @@ namespace UndertaleModTool.ProjectTool.Resources
     }
 
     /// <summary>
-    /// Classe para armazenar dados do Spine (apenas para referência interna, não serializado)
+    /// Classe para armazenar dados do Spine
     /// </summary>
     public class GMSpineData
     {
