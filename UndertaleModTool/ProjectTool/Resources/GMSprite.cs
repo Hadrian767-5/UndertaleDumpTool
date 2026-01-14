@@ -84,6 +84,9 @@ namespace UndertaleModTool.ProjectTool.Resources
 
 		private int BboxWidth => bbox_right - bbox_left + 1;
 		private int BboxHeight => bbox_bottom - bbox_top + 1;
+   	    public string spineVersion { get; set; } = ""; // ex: "3.8.75"
+    	public List<string> spineTextures { get; set; } = new();
+    	public GMSpineData spine { get; set; } = null;
 
 		/// <summary>
 		/// Translate an UndertaleTexturePageItem into a frame and add it
@@ -161,6 +164,14 @@ namespace UndertaleModTool.ProjectTool.Resources
         {
             name = source.Name.Content;
             (width, height) = (source.Width, source.Height);
+
+            // Detectar se é um sprite Spine
+            if (source.SVersion >= 2 && source.SpecialType == UndertaleSprite.SpriteType.Spine)
+            {
+                type = Type.Spine;
+                ExportSpineData(source);
+                return; // Sprites Spine não usam o processo normal
+            }
 
 			if (source.V3NineSlice != null)
 				nineSlice = new GMNineSliceData(source.V3NineSlice);
