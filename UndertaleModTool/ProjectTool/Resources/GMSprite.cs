@@ -340,6 +340,68 @@ namespace UndertaleModTool.ProjectTool.Resources
 				Dump.ProjectResources.Add(name, "sprites");
 		}
 
+        private void ExportSpineData(UndertaleSprite source)
+        {
+            // Verificar se existe sprite Spine associado
+            if (source.SpineSprite == null)
+            {
+                Dump.UpdateStatus($"Warning: {name} is marked as Spine but has no Spine data");
+                return;
+            }
+
+            var spineSprite = source.SpineSprite;
+            spine = new GMSpineData();
+
+            // Exportar dados do Spine
+            if (spineSprite.Atlas != null)
+            {
+                string atlasPath = $"sprites/{name}/{name}.atlas";
+                Directory.CreateDirectory(Path.GetDirectoryName(Dump.RelativePath(atlasPath)));
+                File.WriteAllText(Dump.RelativePath(atlasPath), spineSprite.Atlas.Content);
+                spine.atlasFile = $"{name}.atlas";
+            }
+
+            if (spineSprite.JsonData != null)
+            {
+                string jsonPath = $"sprites/{name}/{name}.json";
+                File.WriteAllText(Dump.RelativePath(jsonPath), spineSprite.JsonData.Content);
+                spine.jsonFile = $"{name}.json";
+            }
+
+            // Exportar texturas do Spine
+            if (spineSprite.Textures != null && spineSprite.Textures.Count > 0)
+            {
+                for (int i = 0; i < spineSprite.Textures.Count; i++)
+                {
+                    var texture = spineSprite.Textures[i];
+                    if (texture?.Texture != null)
+                    {
+                        string textureName = $"{name}_{i}.png";
+                        spineTextures.Add(textureName);
+                    
+                        var image = Dump.TexWorker.GetTextureFor(texture.Texture, textureName, true);
+                        _imageFiles.Add(textureName, image);
+                    }
+                }
+            }
+
+            // Configurar propriedades básicas
+            if (spineSprite.Textures?.Count > 0 && spineSprite.Textures[0]?.Texture != null)
+            {
+                width = spineSprite.Textures[0].Texture.BoundingWidth;
+                height = spineSprite.Textures[0].Texture.BoundingHeight;
+            }
+
+            // Configurar grupos de textura
+            if (Dump.Options.project_texturegroups && spineSprite.Textures?.Count > 0)
+            {
+                textureGroupId.SetName(TpageAlign.TextureForOrDefault(spineSprite.Textures[0].Texture).GetName());
+            }
+
+            lock (Dump.ProjectResources)
+                Dump.ProjectResources.Add(name, "sprites");
+        }
+
         /// <summary>
         /// Saves the sprite into GameMaker project format
         /// </summary>
@@ -356,13 +418,33 @@ namespace UndertaleModTool.ProjectTool.Resources
             Dump.ToJsonFile(Path.Join(savePath, $"{name}.yy"), this);
 
             // .png
-            foreach (var i in _imageFiles)
+            if (type == Type.Spine && spine != null)
             {
-				string path = Path.Combine(savePath, i.Key);
-				Directory.CreateDirectory(Path.GetDirectoryName(path));
-				TextureWorker.SaveImageToFile(i.Value, path + ".png");
+                // Os arquivos .atlas e .json já foram salvos em ExportSpineData
+                // Apenas salvar as texturas
+                foreach (var img in _imageFiles)
+                {
+                    string path = Path.Combine(savePath, img.Key);
+                    TextureWorker.SaveImageToFile(img.Value, path);
+                }
+            }
+            else
+            {
+                // Código original para sprites normais
+                foreach (var i in _imageFiles)
+                {
+                    string path = Path.Combine(savePath, i.Key);
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    TextureWorker.SaveImageToFile(i.Value, path + ".png");
+                }
             }
         }
+    }
+	public class GMSpineData
+    {
+        public string atlasFile { get; set; }
+        public string jsonFile { get; set; }
+        public List<string> textureFiles { get; set; } = new();
     }
     public class GMSpriteFrame : ResourceBase
     {
