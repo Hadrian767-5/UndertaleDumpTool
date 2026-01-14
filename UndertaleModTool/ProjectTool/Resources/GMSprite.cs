@@ -255,8 +255,7 @@ namespace UndertaleModTool.ProjectTool.Resources
                 // CRÍTICO: Configurar sequência ANTES de criar frames
                 sequence.name = name;
                 sequence.length = 1; // DEVE ser 1 ou mais
-                sequence.xorigin = 0;
-                sequence.yorigin = 0;
+                (sequence.xorigin, sequence.yorigin) = (0, 0);
 
                 // CRÍTICO: Criar layer ANTES de criar frames
                 var layer = new GMImageLayer();
