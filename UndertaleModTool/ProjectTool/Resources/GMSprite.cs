@@ -262,32 +262,17 @@ namespace UndertaleModTool.ProjectTool.Resources
                 bbox_bottom = (int)height - 1;
                 bboxMode = BboxMode.FullImage;
 
-                // Configurar sequência básica
+                // Configurar sequência básica - SPINE NÃO USA SEQUENCE TRADICIONAL
                 sequence.name = name;
-                sequence.length = 1;
-                (sequence.xorigin, sequence.yorigin) = (0, 0); // Spine usa sua própria origem
+                sequence.length = 0; // SPINE não tem frames de sprite tradicionais
+                (sequence.xorigin, sequence.yorigin) = (0, 0);
 
-                // Configurar layer
-                var layer = new GMImageLayer();
-                layer.name = Dump.ToGUID($"{name}.layer");
-                layers.Add(layer);
+                // SPINE NÃO USA LAYERS DE IMAGEM
+                // Remover camada de imagem se for Spine
+                // layers permanece vazio para sprites Spine
 
-                // CORREÇÃO: Adicionar um frame vazio para sprites Spine
-                string frameGuid = Dump.ToGUID($"{name}.0");
-                frames.Add(new GMSpriteFrame { name = frameGuid });
-
-                // Criar track de frames
-                _framesTrack = new();
-                sequence.tracks.Add(_framesTrack);
-
-                // Adicionar keyframe
-                SpriteFrameKeyframe keyframe = new();
-                keyframe.Id = new IdPath(frameGuid, $"sprites/{name}/{name}.yy");
-                Keyframe<SpriteFrameKeyframe> keyframeHolder = new();
-                keyframeHolder.id = Dump.ToGUID($"{name}.0k");
-                keyframeHolder.Key = 0;
-                keyframeHolder.Channels.Add("0", keyframe);
-                _framesTrack.keyframes.Keyframes.Add(keyframeHolder);
+                // SPINE NÃO USA FRAMES TRADICIONAIS
+                // Não adicionar frames para sprites Spine
 
                 lock (Dump.ProjectResources)
                     Dump.ProjectResources.Add(name, "sprites");
