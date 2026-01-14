@@ -272,6 +272,23 @@ namespace UndertaleModTool.ProjectTool.Resources
                 layer.name = Dump.ToGUID($"{name}.layer");
                 layers.Add(layer);
 
+                // CORREÇÃO: Adicionar um frame vazio para sprites Spine
+                string frameGuid = Dump.ToGUID($"{name}.0");
+                frames.Add(new GMSpriteFrame { name = frameGuid });
+
+                // Criar track de frames
+                _framesTrack = new();
+                sequence.tracks.Add(_framesTrack);
+
+                // Adicionar keyframe
+                SpriteFrameKeyframe keyframe = new();
+                keyframe.Id = new IdPath(frameGuid, $"sprites/{name}/{name}.yy");
+                Keyframe<SpriteFrameKeyframe> keyframeHolder = new();
+                keyframeHolder.id = Dump.ToGUID($"{name}.0k");
+                keyframeHolder.Key = 0;
+                keyframeHolder.Channels.Add("0", keyframe);
+                _framesTrack.keyframes.Keyframes.Add(keyframeHolder);
+
                 lock (Dump.ProjectResources)
                     Dump.ProjectResources.Add(name, "sprites");
 
