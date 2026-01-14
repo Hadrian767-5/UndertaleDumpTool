@@ -154,176 +154,18 @@ namespace UndertaleModTool.ProjectTool.Resources
         /// <summary>
         /// Exporta os dados do Spine
         /// </summary>
-        private void ExportSpineData(UndertaleSprite source)
-        {
-            try
-            {
-                Dump.UpdateStatus($"Exporting Spine sprite: {name}");
-
-                // Verificar se é realmente um sprite Spine
-                if (!source.IsSpineSprite)
-                {
-                    Dump.UpdateStatus($"Warning: {name} is not a Spine sprite");
-                    return;
-                }
-
-                type = Type.Spine;
-                spine = new GMSpineData();
-
-                spine.spineVersion = "3.8.99"; // Ajuste conforme a versão real
-                spine.renderQuality = 1.0;
-                spine.premultipliedAlpha = true;
-
-                // Criar diretório do sprite
-                string spriteFolder = Dump.RelativePath($"sprites/{name}/");
-                Directory.CreateDirectory(spriteFolder);
-
-                // Exportar arquivo .atlas
-                if (!string.IsNullOrEmpty(source.SpineAtlas))
-                {
-                    string atlasPath = Path.Combine(spriteFolder, $"{name}.atlas");
-                    File.WriteAllText(atlasPath, source.SpineAtlas);
-                    spine.atlasFile = $"{name}.atlas";
-                    Dump.UpdateStatus($"{name} - Atlas exported");
-                }
-
-                // Exportar arquivo .json
-                if (!string.IsNullOrEmpty(source.SpineJSON))
-                {
-                    string jsonPath = Path.Combine(spriteFolder, $"{name}.json");
-                    File.WriteAllText(jsonPath, source.SpineJSON);
-                    spine.jsonFile = $"{name}.json";
-                    Dump.UpdateStatus($"{name} - JSON exported");
-                }
-                
-                if (string.IsNullOrEmpty(source.SpineAtlas) || string.IsNullOrEmpty(source.SpineJSON))
-                {
-                    Dump.UpdateStatus($"Error: {name} - Missing Spine atlas or JSON data");
-                    type = Type.Bitmap;
-                    return;
-                }
-
-                if (source.SpineTextures == null || source.SpineTextures.Count == 0)
-                {
-                    Dump.UpdateStatus($"Error: {name} - No Spine textures found");
-                    type = Type.Bitmap;
-                    return;
-                }
-
-                // Exportar texturas do Spine usando TexBlob
-                if (source.SpineTextures != null && source.SpineTextures.Count > 0)
-                {
-                    for (int i = 0; i < source.SpineTextures.Count; i++)
-                    {
-                        var spineTexEntry = source.SpineTextures[i];
-                        if (spineTexEntry != null && spineTexEntry.TexBlob != null && spineTexEntry.TexBlob.Length > 0)
-                        {
-                            try
-                            {
-                                string textureName = $"{name}_texture_{i}.png";
-                                
-                                // Criar imagem a partir do TexBlob (QOI ou PNG)
-                                IMagickImage<byte> image = new MagickImage(spineTexEntry.TexBlob);
-                                
-                                // Redimensionar se necessário para corresponder às dimensões da página
-                                if (spineTexEntry.PageWidth > 0 && spineTexEntry.PageHeight > 0)
-                                {
-                                    if (image.Width != spineTexEntry.PageWidth || image.Height != spineTexEntry.PageHeight)
-                                    {
-                                        var geometry = new MagickGeometry((uint)spineTexEntry.PageWidth, (uint)spineTexEntry.PageHeight);
-                                        geometry.IgnoreAspectRatio = true;
-                                        image.Resize(geometry);
-                                    }
-                                }
-                                
-                                _imageFiles.Add(textureName, image);
-                                spine.textureFiles.Add(textureName);
-                                
-                                Dump.UpdateStatus($"{name} - Spine Texture {i} ({spineTexEntry.PageWidth}x{spineTexEntry.PageHeight})");
-                            }
-                            catch (Exception ex)
-                            {
-                                Dump.UpdateStatus($"Warning: Failed to export Spine texture {i} for {name}: {ex.Message}");
-                            }
-                        }
-                    }
-                }
-
-                // Configurar dimensões básicas (usar primeira textura se disponível)
-                if (source.SpineTextures != null && source.SpineTextures.Count > 0 && source.SpineTextures[0] != null)
-                {
-                    var firstTexture = source.SpineTextures[0];
-                    if (firstTexture.PageWidth > 0 && firstTexture.PageHeight > 0)
-                    {
-                        width = (uint)firstTexture.PageWidth;
-                        height = (uint)firstTexture.PageHeight;
-                    }
-                    else
-                    {
-                        width = source.Width;
-                        height = source.Height;
-                    }
-                }
-                else
-                {
-                    width = source.Width;
-                    height = source.Height;
-                }
-
-                // Configurar origem
-                origin = Origin.TopLeft; // Spine geralmente usa top-left como padrão
-                
-                // Configurar bounding box para o tamanho completo
-                bbox_left = 0;
-                bbox_top = 0;
-                bbox_right = (int)width - 1;
-                bbox_bottom = (int)height - 1;
-                bboxMode = BboxMode.FullImage;
-
-                // SPRITES SPINE PRECISAM DE ESTRUTURA COMPLETA COMO SPRITES NORMAIS
-                // Configurar sequência básica
-                sequence.name = name;
-                sequence.length = 0; // Spine não usa frames tradicionais
-                (sequence.xorigin, sequence.yorigin) = (0, 0);
-
-                // Configurar layer - SPINE PRECISA DE LAYER
-                var layer = new GMImageLayer();
-                layer.name = Dump.ToGUID($"{name}.layer");
-                layers.Add(layer);
-
-                // CRIAR FRAME E TRACK - NECESSÁRIO PARA EVITAR ERROS DE ÍNDICE
-                _framesTrack = new();
-                sequence.tracks.Add(_framesTrack);
-
-                string frameGuid = Dump.ToGUID($"{name}.0");
-                // frames.Add(new GMSpriteFrame { name = frameGuid });
-
-                // Adicionar keyframe
-                SpriteFrameKeyframe keyframe = new();
-                keyframe.Id = new IdPath(frameGuid, $"sprites/{name}/{name}.yy");
-                Keyframe<SpriteFrameKeyframe> keyframeHolder = new();
-                keyframeHolder.id = Dump.ToGUID($"{name}.0k");
-                keyframeHolder.Key = 0;
-                keyframeHolder.Channels.Add("0", keyframe);
-                _framesTrack.keyframes.Keyframes.Add(keyframeHolder);
-
-                // Criar imagem dummy para o layer (transparente, 1x1)
-                IMagickImage<byte> dummyImage = new MagickImage(MagickColors.Transparent, width, height);
-                // _imageFiles.Add($"{frameGuid}", dummyImage);
-                // _imageFiles.Add($"layers/{frameGuid}/{layer.name}", dummyImage);
-
-                lock (Dump.ProjectResources)
-                    Dump.ProjectResources.Add(name, "sprites");
-
-                Dump.UpdateStatus($"{name} - Spine export completed");
-            }
-            catch (Exception ex)
-            {
-                Dump.UpdateStatus($"Error exporting Spine sprite {name}: {ex.Message}");
-                // Em caso de erro, tente continuar como sprite normal
-                type = Type.Bitmap;
-            }
-        }
+        System.ArgumentOutOfRangeException: O índice estava fora do intervalo. Ele deve ser não-negativo e menor que o tamanho da coleção.
+Nome do parâmetro: index
+   em System.ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument argument, ExceptionResource resource)
+   em System.Collections.Generic.List`1.get_Item(Int32 index)
+   em GMAssetCompiler.GMSprite..ctor(GMAssets _assets, IdReference _id)
+   em GMAssetCompiler.GMAssets.(GMProject , String )
+   em GMAssetCompiler.Loader.(String )
+   em GMAssetCompiler.Loader.(String )
+   em GMAssetCompiler.Program.(List`1 )
+   em GMAssetCompiler.Program.Main(String[] _args)
+-----------------------------------------------------------------------------
+EXCEPTION FILE - C:\Users\Home\AppData\Local\Temp\41cd41062c0748cfaf4989c3d31e819b.yyg.saencryptedreport
 
         /// <summary>
         /// Translate an UndertaleSprite to a new GMSprite
