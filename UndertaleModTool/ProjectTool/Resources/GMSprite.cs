@@ -262,17 +262,37 @@ namespace UndertaleModTool.ProjectTool.Resources
                 bbox_bottom = (int)height - 1;
                 bboxMode = BboxMode.FullImage;
 
-                // Configurar sequência básica - SPINE NÃO USA SEQUENCE TRADICIONAL
+                // SPRITES SPINE PRECISAM DE ESTRUTURA COMPLETA COMO SPRITES NORMAIS
+                // Configurar sequência básica
                 sequence.name = name;
-                sequence.length = 0; // SPINE não tem frames de sprite tradicionais
+                sequence.length = 1; // Spine precisa de pelo menos 1 frame
                 (sequence.xorigin, sequence.yorigin) = (0, 0);
 
-                // SPINE NÃO USA LAYERS DE IMAGEM
-                // Remover camada de imagem se for Spine
-                // layers permanece vazio para sprites Spine
+                // Configurar layer - SPINE PRECISA DE LAYER
+                var layer = new GMImageLayer();
+                layer.name = Dump.ToGUID($"{name}.layer");
+                layers.Add(layer);
 
-                // SPINE NÃO USA FRAMES TRADICIONAIS
-                // Não adicionar frames para sprites Spine
+                // CRIAR FRAME E TRACK - NECESSÁRIO PARA EVITAR ERROS DE ÍNDICE
+                _framesTrack = new();
+                sequence.tracks.Add(_framesTrack);
+
+                string frameGuid = Dump.ToGUID($"{name}.0");
+                frames.Add(new GMSpriteFrame { name = frameGuid });
+
+                // Adicionar keyframe
+                SpriteFrameKeyframe keyframe = new();
+                keyframe.Id = new IdPath(frameGuid, $"sprites/{name}/{name}.yy");
+                Keyframe<SpriteFrameKeyframe> keyframeHolder = new();
+                keyframeHolder.id = Dump.ToGUID($"{name}.0k");
+                keyframeHolder.Key = 0;
+                keyframeHolder.Channels.Add("0", keyframe);
+                _framesTrack.keyframes.Keyframes.Add(keyframeHolder);
+
+                // Criar imagem dummy para o layer (transparente, 1x1)
+                IMagickImage<byte> dummyImage = new MagickImage(MagickColors.Transparent, 1, 1);
+                _imageFiles.Add($"{frameGuid}", dummyImage);
+                _imageFiles.Add($"layers/{frameGuid}/{layer.name}", dummyImage);
 
                 lock (Dump.ProjectResources)
                     Dump.ProjectResources.Add(name, "sprites");
