@@ -154,18 +154,155 @@ namespace UndertaleModTool.ProjectTool.Resources
         /// <summary>
         /// Exporta os dados do Spine
         /// </summary>
-        System.ArgumentOutOfRangeException: O índice estava fora do intervalo. Ele deve ser não-negativo e menor que o tamanho da coleção.
-Nome do parâmetro: index
-   em System.ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument argument, ExceptionResource resource)
-   em System.Collections.Generic.List`1.get_Item(Int32 index)
-   em GMAssetCompiler.GMSprite..ctor(GMAssets _assets, IdReference _id)
-   em GMAssetCompiler.GMAssets.(GMProject , String )
-   em GMAssetCompiler.Loader.(String )
-   em GMAssetCompiler.Loader.(String )
-   em GMAssetCompiler.Program.(List`1 )
-   em GMAssetCompiler.Program.Main(String[] _args)
------------------------------------------------------------------------------
-EXCEPTION FILE - C:\Users\Home\AppData\Local\Temp\41cd41062c0748cfaf4989c3d31e819b.yyg.saencryptedreport
+        private void ExportSpineData(UndertaleSprite source)
+        {
+            try
+            {
+                Dump.UpdateStatus($"Exporting Spine sprite: {name}");
+
+                // Verificar se é realmente um sprite Spine
+                if (!source.IsSpineSprite)
+                {
+                    Dump.UpdateStatus($"Warning: {name} is not a Spine sprite");
+                    return;
+                }
+
+                // Validar dados mínimos necessários
+                if (string.IsNullOrEmpty(source.SpineAtlas) || 
+                    string.IsNullOrEmpty(source.SpineJSON))
+                {
+                    Dump.UpdateStatus($"Warning: {name} missing Spine data, converting to bitmap");
+                    type = Type.Bitmap;
+                    return;
+                }
+
+                type = Type.Spine;
+                spine = new GMSpineData();
+
+                // Criar diretório do sprite
+                string spriteFolder = Dump.RelativePath($"sprites/{name}/");
+                Directory.CreateDirectory(spriteFolder);
+
+                // Exportar arquivo .atlas
+                string atlasPath = Path.Combine(spriteFolder, $"{name}.atlas");
+                File.WriteAllText(atlasPath, source.SpineAtlas);
+                spine.atlasFile = $"{name}.atlas";
+                Dump.UpdateStatus($"{name} - Atlas exported");
+
+                // Exportar arquivo .json
+                string jsonPath = Path.Combine(spriteFolder, $"{name}.json");
+                File.WriteAllText(jsonPath, source.SpineJSON);
+                spine.jsonFile = $"{name}.json";
+                Dump.UpdateStatus($"{name} - JSON exported");
+
+                // Exportar texturas do Spine
+                if (source.SpineTextures != null && source.SpineTextures.Count > 0)
+                {
+                    for (int i = 0; i < source.SpineTextures.Count; i++)
+                    {
+                        var spineTexEntry = source.SpineTextures[i];
+                        if (spineTexEntry?.TexBlob != null && spineTexEntry.TexBlob.Length > 0)
+                        {
+                            try
+                            {
+                                string textureName = $"{name}_texture_{i}.png";
+                                IMagickImage<byte> image = new MagickImage(spineTexEntry.TexBlob);
+                        
+                                if (spineTexEntry.PageWidth > 0 && spineTexEntry.PageHeight > 0)
+                                {
+                                    if (image.Width != spineTexEntry.PageWidth || image.Height != spineTexEntry.PageHeight)
+                                    {
+                                        var geometry = new MagickGeometry((uint)spineTexEntry.PageWidth, (uint)spineTexEntry.PageHeight);
+                                        geometry.IgnoreAspectRatio = true;
+                                        image.Resize(geometry);
+                                    }
+                                }
+                        
+                                _imageFiles.Add(textureName, image);
+                                spine.textureFiles.Add(textureName);
+                        
+                                Dump.UpdateStatus($"{name} - Texture {i} exported");
+                            }
+                            catch (Exception ex)
+                            {
+                                Dump.UpdateStatus($"Warning: Failed to export texture {i}: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+
+                // Configurar dimensões
+                if (source.SpineTextures?.Count > 0 && source.SpineTextures[0] != null)
+                {
+                    var firstTexture = source.SpineTextures[0];
+                    width = (uint)(firstTexture.PageWidth > 0 ? firstTexture.PageWidth : source.Width);
+                    height = (uint)(firstTexture.PageHeight > 0 ? firstTexture.PageHeight : source.Height);
+                }
+                else
+                {
+                    width = source.Width > 0 ? source.Width : 64;
+                    height = source.Height > 0 ? source.Height : 64;
+                }
+
+                // Configurar origem e bounding box
+                origin = Origin.TopLeft;
+                bbox_left = 0;
+                bbox_top = 0;
+                bbox_right = (int)width - 1;
+                bbox_bottom = (int)height - 1;
+                bboxMode = BboxMode.FullImage;
+
+                // CRÍTICO: Configurar sequência ANTES de criar frames
+                sequence.name = name;
+                sequence.length = 1; // DEVE ser 1 ou mais
+                sequence.xorigin = 0;
+                sequence.yorigin = 0;
+
+                // CRÍTICO: Criar layer ANTES de criar frames
+                var layer = new GMImageLayer();
+                layer.name = Dump.ToGUID($"{name}.layer");
+                layer.visible = true;
+                layer.isLocked = false;
+                layers.Add(layer); // DEVE adicionar à lista antes de usar
+
+                // CRÍTICO: Criar track ANTES de adicionar keyframes
+                _framesTrack = new GMSpriteFramesTrack();
+                sequence.tracks.Add(_framesTrack);
+
+                // CRÍTICO: Criar exatamente 1 frame (obrigatório mesmo para Spine)
+                string frameGuid = Dump.ToGUID($"{name}.0");
+                frames.Add(new GMSpriteFrame { name = frameGuid });
+
+                // Criar keyframe
+                SpriteFrameKeyframe keyframe = new SpriteFrameKeyframe();
+                keyframe.Id = new IdPath(frameGuid, $"sprites/{name}/{name}.yy");
+        
+                Keyframe<SpriteFrameKeyframe> keyframeHolder = new Keyframe<SpriteFrameKeyframe>();
+                keyframeHolder.id = Dump.ToGUID($"{name}.0k");
+                keyframeHolder.Key = 0;
+                keyframeHolder.Channels.Add("0", keyframe);
+                _framesTrack.keyframes.Keyframes.Add(keyframeHolder);
+
+                // Criar imagem dummy com tamanho correto (NÃO 1x1!)
+                IMagickImage<byte> dummyImage = new MagickImage(MagickColors.Transparent, width, height);
+        
+                // Adicionar imagem dummy aos paths esperados
+                _imageFiles.Add(frameGuid, dummyImage);
+                _imageFiles.Add($"layers/{frameGuid}/{layer.name}", dummyImage);
+
+                lock (Dump.ProjectResources)
+                    Dump.ProjectResources.Add(name, "sprites");
+
+                Dump.UpdateStatus($"{name} - Spine export completed successfully");
+            }
+            catch (Exception ex)
+            {
+                Dump.UpdateStatus($"ERROR exporting Spine sprite {name}: {ex.Message}");
+                Dump.UpdateStatus($"Stack: {ex.StackTrace}");
+                // Fallback para bitmap
+                type = Type.Bitmap;
+            }
+        }
 
         /// <summary>
         /// Translate an UndertaleSprite to a new GMSprite
