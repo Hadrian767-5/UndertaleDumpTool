@@ -170,6 +170,10 @@ namespace UndertaleModTool.ProjectTool.Resources
                 type = Type.Spine;
                 spine = new GMSpineData();
 
+                spine.spineVersion = "3.8.99"; // Ajuste conforme a versão real
+                spine.renderQuality = 1.0;
+                spine.premultipliedAlpha = true;
+
                 // Criar diretório do sprite
                 string spriteFolder = Dump.RelativePath($"sprites/{name}/");
                 Directory.CreateDirectory(spriteFolder);
@@ -279,7 +283,7 @@ namespace UndertaleModTool.ProjectTool.Resources
                 // SPRITES SPINE PRECISAM DE ESTRUTURA COMPLETA COMO SPRITES NORMAIS
                 // Configurar sequência básica
                 sequence.name = name;
-                sequence.length = 1; // Spine precisa de pelo menos 1 frame
+                sequence.length = 0; // Spine não usa frames tradicionais
                 (sequence.xorigin, sequence.yorigin) = (0, 0);
 
                 // Configurar layer - SPINE PRECISA DE LAYER
@@ -292,7 +296,7 @@ namespace UndertaleModTool.ProjectTool.Resources
                 sequence.tracks.Add(_framesTrack);
 
                 string frameGuid = Dump.ToGUID($"{name}.0");
-                frames.Add(new GMSpriteFrame { name = frameGuid });
+                // frames.Add(new GMSpriteFrame { name = frameGuid });
 
                 // Adicionar keyframe
                 SpriteFrameKeyframe keyframe = new();
@@ -305,8 +309,8 @@ namespace UndertaleModTool.ProjectTool.Resources
 
                 // Criar imagem dummy para o layer (transparente, 1x1)
                 IMagickImage<byte> dummyImage = new MagickImage(MagickColors.Transparent, width, height);
-                _imageFiles.Add($"{frameGuid}", dummyImage);
-                _imageFiles.Add($"layers/{frameGuid}/{layer.name}", dummyImage);
+                // _imageFiles.Add($"{frameGuid}", dummyImage);
+                // _imageFiles.Add($"layers/{frameGuid}/{layer.name}", dummyImage);
 
                 lock (Dump.ProjectResources)
                     Dump.ProjectResources.Add(name, "sprites");
@@ -514,10 +518,13 @@ namespace UndertaleModTool.ProjectTool.Resources
             // Salvar imagens
             foreach (var i in _imageFiles)
             {
+                // Pular imagens dummy para sprites Spine
+                if (type == Type.Spine && (i.Key.Contains("layers/") || i.Key.Contains(".0")))
+                    continue;
+        
                 string path = Path.Combine(savePath, i.Key);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
     
-                // Verificar se já tem extensão .png
                 if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
                     path += ".png";
     
