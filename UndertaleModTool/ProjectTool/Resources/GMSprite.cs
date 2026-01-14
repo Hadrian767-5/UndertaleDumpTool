@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using ImageMagick;
@@ -82,11 +82,11 @@ namespace UndertaleModTool.ProjectTool.Resources
         public List<GMImageLayer> layers { get; set; } = new();
         public GMNineSliceData nineSlice { get; set; } = null;
 
+		// Spine-specific properties
+		public GMSpineData spine { get; set; } = null;
+
 		private int BboxWidth => bbox_right - bbox_left + 1;
 		private int BboxHeight => bbox_bottom - bbox_top + 1;
-   	    public string spineVersion { get; set; } = ""; // ex: "3.8.75"
-    	public List<string> spineTextures { get; set; } = new();
-    	public GMSpineData spine { get; set; } = null;
 
 		/// <summary>
 		/// Translate an UndertaleTexturePageItem into a frame and add it
@@ -157,6 +157,114 @@ namespace UndertaleModTool.ProjectTool.Resources
         private GMSpriteFramesTrack _framesTrack;
         private Dictionary<string, IMagickImage<byte>> _imageFiles = new();
 
+		/// <summary>
+		/// Export Spine sprite data (JSON, Atlas, and textures)
+		/// </summary>
+		private void ExportSpineData(UndertaleSprite source)
+		{
+			type = Type.Spine;
+			spine = new GMSpineData();
+
+			Dump.UpdateStatus($"Exporting Spine sprite: {name}");
+
+			// Check if sprite has Spine data
+			if (!source.IsSpineSprite)
+			{
+				Dump.UpdateStatus($"Warning: {name} is marked as Spine type but has no Spine data");
+				return;
+			}
+
+			// Export Spine JSON skeleton data
+			if (source.SpineJSON != null)
+			{
+				spine.skeletonFile = $"{name}.json";
+				_spineFiles.Add(spine.skeletonFile, source.SpineJSON);
+				Dump.UpdateStatus($"{name} - Exported JSON skeleton");
+			}
+
+			// Export Spine Atlas data
+			if (source.SpineAtlas != null)
+			{
+				spine.atlasFile = $"{name}.atlas";
+				_spineFiles.Add(spine.atlasFile, source.SpineAtlas);
+				Dump.UpdateStatus($"{name} - Exported Atlas");
+			}
+
+			// Export Spine textures
+			if (source.SpineTextures != null && source.SpineTextures.Count > 0)
+			{
+				for (int i = 0; i < source.SpineTextures.Count; i++)
+				{
+					var spineTexture = source.SpineTextures[i];
+					if (spineTexture == null) continue;
+
+					Dump.UpdateStatus($"{name} - Exporting Spine texture {i + 1}/{source.SpineTextures.Count}");
+
+					string textureName = $"{name}_{i}.png";
+					spine.textureFiles.Add(textureName);
+
+					// Get texture from SpineTexture entry
+					// Note: SpineTextures store texture data differently than regular sprite textures
+					if (spineTexture.Texture != null)
+					{
+						var image = Dump.TexWorker.GetTextureFor(spineTexture.Texture, textureName, true);
+						_imageFiles.Add(textureName, image);
+					}
+					else if (source.SpineHasTextureData && spineTexture.TexBlob != null)
+					{
+						// Some Spine sprites store texture data directly in a blob
+						try
+						{
+							using (var ms = new MemoryStream(spineTexture.TexBlob))
+							{
+								var image = new MagickImage(ms);
+								_imageFiles.Add(textureName, image);
+							}
+						}
+						catch (Exception ex)
+						{
+							Dump.UpdateStatus($"Warning: Failed to load Spine texture blob for {name}: {ex.Message}");
+						}
+					}
+				}
+
+				// Set dimensions from first texture if available
+				if (source.SpineTextures.Count > 0 && source.SpineTextures[0].Texture != null)
+				{
+					var firstTexture = source.SpineTextures[0].Texture;
+					width = firstTexture.BoundingWidth;
+					height = firstTexture.BoundingHeight;
+				}
+			}
+
+			// Set texture group if enabled
+			if (Dump.Options.project_texturegroups && source.SpineTextures?.Count > 0)
+			{
+				var firstTexture = source.SpineTextures[0]?.Texture;
+				if (firstTexture != null)
+				{
+					textureGroupId.SetName(TpageAlign.TextureForOrDefault(firstTexture).GetName());
+				}
+			}
+
+			// Spine sprites typically don't have standard frames
+			// But we may need to create a dummy frame for compatibility
+			if (frames.Count == 0)
+			{
+				var layer = new GMImageLayer();
+				layer.name = Dump.ToGUID($"{name}.layer");
+				layers.Add(layer);
+
+				// Create a single dummy frame
+				string frameGuid = Dump.ToGUID($"{name}.0");
+				frames.Add(new GMSpriteFrame { name = frameGuid });
+
+				sequence.length = 1;
+			}
+		}
+
+		private Dictionary<string, string> _spineFiles = new();
+
         /// <summary>
         /// Translate an UndertaleSprite to a new GMSprite
         /// </summary>
@@ -165,13 +273,16 @@ namespace UndertaleModTool.ProjectTool.Resources
             name = source.Name.Content;
             (width, height) = (source.Width, source.Height);
 
-            // Detectar se é um sprite Spine
-            if (source.SVersion >= 2 && source.SpecialType == UndertaleSprite.SpriteType.Spine)
-            {
-                type = Type.Spine;
-                ExportSpineData(source);
-                return; // Sprites Spine não usam o processo normal
-            }
+			// Check if this is a Spine sprite
+			if (source.IsSpineSprite)
+			{
+				ExportSpineData(source);
+				
+				lock (Dump.ProjectResources)
+					Dump.ProjectResources.Add(name, "sprites");
+				
+				return; // Skip normal sprite processing for Spine sprites
+			}
 
 			if (source.V3NineSlice != null)
 				nineSlice = new GMNineSliceData(source.V3NineSlice);
@@ -340,68 +451,6 @@ namespace UndertaleModTool.ProjectTool.Resources
 				Dump.ProjectResources.Add(name, "sprites");
 		}
 
-        private void ExportSpineData(UndertaleSprite source)
-        {
-            // Verificar se existe sprite Spine associado
-            if (source.SpineSprite == null)
-            {
-                Dump.UpdateStatus($"Warning: {name} is marked as Spine but has no Spine data");
-                return;
-            }
-
-            var spineSprite = source.SpineSprite;
-            spine = new GMSpineData();
-
-            // Exportar dados do Spine
-            if (spineSprite.Atlas != null)
-            {
-                string atlasPath = $"sprites/{name}/{name}.atlas";
-                Directory.CreateDirectory(Path.GetDirectoryName(Dump.RelativePath(atlasPath)));
-                File.WriteAllText(Dump.RelativePath(atlasPath), spineSprite.Atlas.Content);
-                spine.atlasFile = $"{name}.atlas";
-            }
-
-            if (spineSprite.JsonData != null)
-            {
-                string jsonPath = $"sprites/{name}/{name}.json";
-                File.WriteAllText(Dump.RelativePath(jsonPath), spineSprite.JsonData.Content);
-                spine.jsonFile = $"{name}.json";
-            }
-
-            // Exportar texturas do Spine
-            if (spineSprite.Textures != null && spineSprite.Textures.Count > 0)
-            {
-                for (int i = 0; i < spineSprite.Textures.Count; i++)
-                {
-                    var texture = spineSprite.Textures[i];
-                    if (texture?.Texture != null)
-                    {
-                        string textureName = $"{name}_{i}.png";
-                        spineTextures.Add(textureName);
-                    
-                        var image = Dump.TexWorker.GetTextureFor(texture.Texture, textureName, true);
-                        _imageFiles.Add(textureName, image);
-                    }
-                }
-            }
-
-            // Configurar propriedades básicas
-            if (spineSprite.Textures?.Count > 0 && spineSprite.Textures[0]?.Texture != null)
-            {
-                width = spineSprite.Textures[0].Texture.BoundingWidth;
-                height = spineSprite.Textures[0].Texture.BoundingHeight;
-            }
-
-            // Configurar grupos de textura
-            if (Dump.Options.project_texturegroups && spineSprite.Textures?.Count > 0)
-            {
-                textureGroupId.SetName(TpageAlign.TextureForOrDefault(spineSprite.Textures[0].Texture).GetName());
-            }
-
-            lock (Dump.ProjectResources)
-                Dump.ProjectResources.Add(name, "sprites");
-        }
-
         /// <summary>
         /// Saves the sprite into GameMaker project format
         /// </summary>
@@ -414,38 +463,43 @@ namespace UndertaleModTool.ProjectTool.Resources
             string savePath = Dump.RelativePath(spriteFolder);
             Directory.CreateDirectory(savePath);
 
-            // .yy
-            Dump.ToJsonFile(Path.Join(savePath, $"{name}.yy"), this);
+			// Save Spine-specific files if this is a Spine sprite
+			if (type == Type.Spine && spine != null)
+			{
+				Dump.UpdateStatus($"Saving Spine sprite: {name}");
 
-            // .png
-            if (type == Type.Spine && spine != null)
-            {
-                // Os arquivos .atlas e .json já foram salvos em ExportSpineData
-                // Apenas salvar as texturas
-                foreach (var img in _imageFiles)
-                {
-                    string path = Path.Combine(savePath, img.Key);
-                    TextureWorker.SaveImageToFile(img.Value, path);
-                }
-            }
-            else
-            {
-                // Código original para sprites normais
-                foreach (var i in _imageFiles)
-                {
-                    string path = Path.Combine(savePath, i.Key);
-                    Directory.CreateDirectory(Path.GetDirectoryName(path));
-                    TextureWorker.SaveImageToFile(i.Value, path + ".png");
-                }
-            }
+				// Save JSON and Atlas files
+				foreach (var spineFile in _spineFiles)
+				{
+					string filePath = Path.Combine(savePath, spineFile.Key);
+					File.WriteAllText(filePath, spineFile.Value);
+					Dump.UpdateStatus($"{name} - Saved {spineFile.Key}");
+				}
+
+				// Save texture images
+				foreach (var img in _imageFiles)
+				{
+					string path = Path.Combine(savePath, img.Key);
+					TextureWorker.SaveImageToFile(img.Value, path);
+					Dump.UpdateStatus($"{name} - Saved texture {img.Key}");
+				}
+			}
+			else
+			{
+				// Save normal sprite images
+				foreach (var i in _imageFiles)
+				{
+					string path = Path.Combine(savePath, i.Key);
+					Directory.CreateDirectory(Path.GetDirectoryName(path));
+					TextureWorker.SaveImageToFile(i.Value, path + ".png");
+				}
+			}
+
+            // Save .yy metadata file
+            Dump.ToJsonFile(Path.Join(savePath, $"{name}.yy"), this);
         }
     }
-	public class GMSpineData
-    {
-        public string atlasFile { get; set; }
-        public string jsonFile { get; set; }
-        public List<string> textureFiles { get; set; } = new();
-    }
+    
     public class GMSpriteFrame : ResourceBase
     {
         public GMSpriteFrame()
@@ -453,6 +507,7 @@ namespace UndertaleModTool.ProjectTool.Resources
             resourceVersion = "1.1";
         }
     }
+    
     public class GMImageLayer : ResourceBase
     {
         public enum BlendMode
@@ -468,6 +523,7 @@ namespace UndertaleModTool.ProjectTool.Resources
         public float opacity { get; set; } = 100.0f;
         public string displayName = "default";
     }
+    
     public class GMNineSliceData : ResourceBase
     {
         private static uint DEFAULT_GUIDE_COLOUR = 4294902015;
@@ -501,8 +557,6 @@ namespace UndertaleModTool.ProjectTool.Resources
         /// <summary>
         /// Translate an UndertaleSprite.NineSlice to GMNineSliceData
         /// </summary>
-        /// <param name="source"></param>
-        /// <returns></returns>
         public GMNineSliceData(UndertaleSprite.NineSlice source)
         {
             left = source.Left;
@@ -514,4 +568,14 @@ namespace UndertaleModTool.ProjectTool.Resources
                 tileMode[i] = (TileMode)source.TileModes[i];
         }
     }
+
+	/// <summary>
+	/// Stores Spine-specific data for a sprite
+	/// </summary>
+	public class GMSpineData
+	{
+		public string skeletonFile { get; set; } = null;
+		public string atlasFile { get; set; } = null;
+		public List<string> textureFiles { get; set; } = new();
+	}
 }
