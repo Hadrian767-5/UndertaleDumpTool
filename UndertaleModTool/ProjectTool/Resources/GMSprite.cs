@@ -156,92 +156,133 @@ namespace UndertaleModTool.ProjectTool.Resources
         /// </summary>
         private void ExportSpineData(UndertaleSprite source)
         {
-            Dump.UpdateStatus($"Exporting Spine sprite: {name}");
-
-            // Verificar se é realmente um sprite Spine
-            if (!source.IsSpineSprite)
+            try
             {
-                Dump.UpdateStatus($"Warning: {name} is not a Spine sprite");
-                return;
-            }
+                Dump.UpdateStatus($"Exporting Spine sprite: {name}");
 
-            type = Type.Spine;
-            spine = new GMSpineData();
-
-            // Criar diretório do sprite
-            string spriteFolder = Dump.RelativePath($"sprites/{name}/");
-            Directory.CreateDirectory(spriteFolder);
-
-            // Exportar arquivo .atlas
-            if (!string.IsNullOrEmpty(source.SpineAtlas))
-            {
-                string atlasPath = Path.Combine(spriteFolder, $"{name}.atlas");
-                File.WriteAllText(atlasPath, source.SpineAtlas);
-                spine.atlasFile = $"{name}.atlas";
-            }
-
-            // Exportar arquivo .json
-            if (!string.IsNullOrEmpty(source.SpineJSON))
-            {
-                string jsonPath = Path.Combine(spriteFolder, $"{name}.json");
-                File.WriteAllText(jsonPath, source.SpineJSON);
-                spine.jsonFile = $"{name}.json";
-            }
-
-            // Exportar texturas do Spine
-            if (source.SpineTextures != null && source.SpineTextures.Count > 0)
-            {
-                for (int i = 0; i < source.SpineTextures.Count; i++)
+                // Verificar se é realmente um sprite Spine
+                if (!source.IsSpineSprite)
                 {
-                    var spineTexEntry = source.SpineTextures[i];
-                    if (spineTexEntry?.Texture != null)
+                    Dump.UpdateStatus($"Warning: {name} is not a Spine sprite");
+                    return;
+                }
+
+                type = Type.Spine;
+                spine = new GMSpineData();
+
+                // Criar diretório do sprite
+                string spriteFolder = Dump.RelativePath($"sprites/{name}/");
+                Directory.CreateDirectory(spriteFolder);
+
+                // Exportar arquivo .atlas
+                if (!string.IsNullOrEmpty(source.SpineAtlas))
+                {
+                    string atlasPath = Path.Combine(spriteFolder, $"{name}.atlas");
+                    File.WriteAllText(atlasPath, source.SpineAtlas);
+                    spine.atlasFile = $"{name}.atlas";
+                    Dump.UpdateStatus($"{name} - Atlas exported");
+                }
+
+                // Exportar arquivo .json
+                if (!string.IsNullOrEmpty(source.SpineJSON))
+                {
+                    string jsonPath = Path.Combine(spriteFolder, $"{name}.json");
+                    File.WriteAllText(jsonPath, source.SpineJSON);
+                    spine.jsonFile = $"{name}.json";
+                    Dump.UpdateStatus($"{name} - JSON exported");
+                }
+
+                // Exportar texturas do Spine usando TexBlob
+                if (source.SpineTextures != null && source.SpineTextures.Count > 0)
+                {
+                    for (int i = 0; i < source.SpineTextures.Count; i++)
                     {
-                        string textureName = $"{name}_texture_{i}.png";
-                        
-                        // Usar GetTextureFor para obter a imagem
-                        var image = Dump.TexWorker.GetTextureFor(spineTexEntry.Texture, textureName, true);
-                        _imageFiles.Add(textureName, image);
-                        
-                        spine.textureFiles.Add(textureName);
-                        
-                        Dump.UpdateStatus($"{name} - Spine Texture {i}");
+                        var spineTexEntry = source.SpineTextures[i];
+                        if (spineTexEntry != null && spineTexEntry.TexBlob != null && spineTexEntry.TexBlob.Length > 0)
+                        {
+                            try
+                            {
+                                string textureName = $"{name}_texture_{i}.png";
+                                
+                                // Criar imagem a partir do TexBlob (QOI ou PNG)
+                                IMagickImage<byte> image = new MagickImage(spineTexEntry.TexBlob);
+                                
+                                // Redimensionar se necessário para corresponder às dimensões da página
+                                if (spineTexEntry.PageWidth > 0 && spineTexEntry.PageHeight > 0)
+                                {
+                                    if (image.Width != spineTexEntry.PageWidth || image.Height != spineTexEntry.PageHeight)
+                                    {
+                                        var geometry = new MagickGeometry((uint)spineTexEntry.PageWidth, (uint)spineTexEntry.PageHeight);
+                                        geometry.IgnoreAspectRatio = true;
+                                        image.Resize(geometry);
+                                    }
+                                }
+                                
+                                _imageFiles.Add(textureName, image);
+                                spine.textureFiles.Add(textureName);
+                                
+                                Dump.UpdateStatus($"{name} - Spine Texture {i} ({spineTexEntry.PageWidth}x{spineTexEntry.PageHeight})");
+                            }
+                            catch (Exception ex)
+                            {
+                                Dump.UpdateStatus($"Warning: Failed to export Spine texture {i} for {name}: {ex.Message}");
+                            }
+                        }
                     }
                 }
-            }
 
-            // Configurar dimensões básicas (usar primeira textura se disponível)
-            if (source.SpineTextures != null && source.SpineTextures.Count > 0 && 
-                source.SpineTextures[0]?.Texture != null)
+                // Configurar dimensões básicas (usar primeira textura se disponível)
+                if (source.SpineTextures != null && source.SpineTextures.Count > 0 && source.SpineTextures[0] != null)
+                {
+                    var firstTexture = source.SpineTextures[0];
+                    if (firstTexture.PageWidth > 0 && firstTexture.PageHeight > 0)
+                    {
+                        width = (uint)firstTexture.PageWidth;
+                        height = (uint)firstTexture.PageHeight;
+                    }
+                    else
+                    {
+                        width = source.Width;
+                        height = source.Height;
+                    }
+                }
+                else
+                {
+                    width = source.Width;
+                    height = source.Height;
+                }
+
+                // Configurar origem
+                origin = Origin.TopLeft; // Spine geralmente usa top-left como padrão
+                
+                // Configurar bounding box para o tamanho completo
+                bbox_left = 0;
+                bbox_top = 0;
+                bbox_right = (int)width - 1;
+                bbox_bottom = (int)height - 1;
+                bboxMode = BboxMode.FullImage;
+
+                // Configurar sequência básica
+                sequence.name = name;
+                sequence.length = 1;
+                (sequence.xorigin, sequence.yorigin) = (0, 0); // Spine usa sua própria origem
+
+                // Configurar layer
+                var layer = new GMImageLayer();
+                layer.name = Dump.ToGUID($"{name}.layer");
+                layers.Add(layer);
+
+                lock (Dump.ProjectResources)
+                    Dump.ProjectResources.Add(name, "sprites");
+
+                Dump.UpdateStatus($"{name} - Spine export completed");
+            }
+            catch (Exception ex)
             {
-                var firstTexture = source.SpineTextures[0].Texture;
-                width = firstTexture.BoundingWidth;
-                height = firstTexture.BoundingHeight;
+                Dump.UpdateStatus($"Error exporting Spine sprite {name}: {ex.Message}");
+                // Em caso de erro, tente continuar como sprite normal
+                type = Type.Bitmap;
             }
-            else
-            {
-                width = source.Width;
-                height = source.Height;
-            }
-
-            // Configurar grupo de textura
-            if (Dump.Options.project_texturegroups && source.SpineTextures != null && 
-                source.SpineTextures.Count > 0 && source.SpineTextures[0]?.Texture != null)
-            {
-                textureGroupId.SetName(TpageAlign.TextureForOrDefault(source.SpineTextures[0].Texture).GetName());
-            }
-
-            // Configurar sequência básica
-            sequence.name = name;
-            sequence.length = 1;
-            (sequence.xorigin, sequence.yorigin) = (source.OriginX, source.OriginY);
-
-            // Configurar layer (Spine não usa layers da mesma forma que sprites normais)
-            var layer = new GMImageLayer();
-            layer.name = Dump.ToGUID($"{name}.layer");
-            layers.Add(layer);
-
-            lock (Dump.ProjectResources)
-                Dump.ProjectResources.Add(name, "sprites");
         }
 
         /// <summary>
