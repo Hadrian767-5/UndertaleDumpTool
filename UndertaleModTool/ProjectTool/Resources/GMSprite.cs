@@ -203,48 +203,89 @@ namespace UndertaleModTool.ProjectTool.Resources
 					string textureName = $"{name}_{i}.png";
 					spine.textureFiles.Add(textureName);
 
-					// Get texture from SpineTexture entry
-					// Note: SpineTextures store texture data differently than regular sprite textures
-					if (spineTexture.Texture != null)
+					// Spine textures are stored as raw bytes in TexBlob
+					if (spineTexture.TexBlob != null && spineTexture.TexBlob.Length > 0)
 					{
-						var image = Dump.TexWorker.GetTextureFor(spineTexture.Texture, textureName, true);
-						_imageFiles.Add(textureName, image);
-					}
-					else if (source.SpineHasTextureData && spineTexture.TexBlob != null)
-					{
-						// Some Spine sprites store texture data directly in a blob
 						try
 						{
+							// Try to load the texture from the blob
+							// It can be either QOI format or PNG
 							using (var ms = new MemoryStream(spineTexture.TexBlob))
 							{
-								var image = new MagickImage(ms);
+								IMagickImage<byte> image;
+						
+								// Check if it's a PNG (starts with PNG magic bytes: 89 50 4E 47)
+								if (spineTexture.TexBlob.Length >= 4 && 
+									spineTexture.TexBlob[0] == 0x89 && 
+									spineTexture.TexBlob[1] == 0x50 &&
+									spineTexture.TexBlob[2] == 0x4E && 
+									spineTexture.TexBlob[3] == 0x47)
+								{
+									// It's a PNG, load directly
+									image = new MagickImage(ms);
+								}
+								else
+								{
+									// It's likely QOI format - need to decode it first
+									// GameMaker uses QOI (Quite OK Image) format for some textures
+									try
+									{
+										var qoiData = TextureWorker.GetImageFromQOI(spineTexture.TexBlob);
+										image = qoiData;
+									}
+									catch
+									{
+										// If QOI decoding fails, try as raw RGBA data
+										image = new MagickImage(spineTexture.TexBlob, 
+											new MagickReadSettings
+											{
+												Width = (uint)spineTexture.PageWidth,
+												Height = (uint)spineTexture.PageHeight,
+												Format = MagickFormat.Rgba
+											});
+									}
+								}
+						
 								_imageFiles.Add(textureName, image);
 							}
 						}
 						catch (Exception ex)
 						{
-							Dump.UpdateStatus($"Warning: Failed to load Spine texture blob for {name}: {ex.Message}");
+							Dump.UpdateStatus($"Warning: Failed to load Spine texture blob for {name}[{i}]: {ex.Message}");
+					
+							// Create a placeholder image
+							var placeholderImage = new MagickImage(MagickColors.Magenta, 
+								(uint)Math.Max(spineTexture.PageWidth, 64), 
+								(uint)Math.Max(spineTexture.PageHeight, 64));
+							_imageFiles.Add(textureName, placeholderImage);
 						}
+					}
+					else if (spineTexture.PageWidth > 0 && spineTexture.PageHeight > 0)
+					{
+						// No texture data but we have dimensions - create placeholder
+						Dump.UpdateStatus($"Warning: {name}[{i}] has no texture data, creating placeholder");
+						var placeholderImage = new MagickImage(MagickColors.Transparent, 
+							(uint)spineTexture.PageWidth, 
+							(uint)spineTexture.PageHeight);
+						_imageFiles.Add(textureName, placeholderImage);
 					}
 				}
 
 				// Set dimensions from first texture if available
-				if (source.SpineTextures.Count > 0 && source.SpineTextures[0].Texture != null)
+				if (source.SpineTextures.Count > 0 && source.SpineTextures[0] != null)
 				{
-					var firstTexture = source.SpineTextures[0].Texture;
-					width = firstTexture.BoundingWidth;
-					height = firstTexture.BoundingHeight;
+					var firstTexture = source.SpineTextures[0];
+					width = (uint)Math.Max(firstTexture.PageWidth, 64);
+					height = (uint)Math.Max(firstTexture.PageHeight, 64);
 				}
 			}
 
 			// Set texture group if enabled
-			if (Dump.Options.project_texturegroups && source.SpineTextures?.Count > 0)
+			// Note: Spine sprites don't have a direct texture group reference like normal sprites
+			// We'll use the default texture group
+			if (Dump.Options.project_texturegroups)
 			{
-				var firstTexture = source.SpineTextures[0]?.Texture;
-				if (firstTexture != null)
-				{
-					textureGroupId.SetName(TpageAlign.TextureForOrDefault(firstTexture).GetName());
-				}
+				textureGroupId.SetName("Default");
 			}
 
 			// Spine sprites typically don't have standard frames
