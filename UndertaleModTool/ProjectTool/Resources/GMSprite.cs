@@ -235,8 +235,8 @@ namespace UndertaleModTool.ProjectTool.Resources
                 if (source.SpineTextures?.Count > 0 && source.SpineTextures[0] != null)
                 {
                     var firstTexture = source.SpineTextures[0];
-                    width = (uint)(firstTexture.PageWidth > 0 ? firstTexture.PageWidth : source.Width);
-                    height = (uint)(firstTexture.PageHeight > 0 ? firstTexture.PageHeight : source.Height);
+                    width = (int)(firstTexture.PageWidth > 0 ? firstTexture.PageWidth : source.Width);
+                    height = (int)(firstTexture.PageHeight > 0 ? firstTexture.PageHeight : source.Height);
                 }
                 else
                 {
