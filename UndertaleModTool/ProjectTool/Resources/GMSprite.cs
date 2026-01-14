@@ -603,5 +603,10 @@ namespace UndertaleModTool.ProjectTool.Resources
         public string atlasFile { get; set; }
         public string jsonFile { get; set; }
         public List<string> textureFiles { get; set; } = new();
+    
+        // ADICIONE ESTES CAMPOS OBRIGATÓRIOS:
+        public string spineVersion { get; set; } = "3.8.99"; // Versão do Spine runtime
+        public double renderQuality { get; set; } = 1.0;
+        public bool premultipliedAlpha { get; set; } = true;
     }
 }
